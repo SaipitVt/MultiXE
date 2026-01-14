@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FX калькулятор</title>
 
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#007aff">
+
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="apple-touch-icon" href="icon-192.png">
+
 <style>
 * { box-sizing: border-box; }
 
@@ -89,6 +97,7 @@ button.clear     { background: #8e8e93; }
 }
 </style>
 </head>
+
 <body>
 
 <div class="container">
@@ -114,7 +123,7 @@ button.clear     { background: #8e8e93; }
     <option value="UAH">UAH</option>
     <option value="OTHER">Другая...</option>
   </select>
-  <input id="fromOther" class="hidden" placeholder="Код (THB, SGD и т.п.)">
+  <input id="fromOther" class="hidden" placeholder="Код валюты (3 буквы)">
 
   <label>В</label>
   <select id="to">
@@ -133,7 +142,7 @@ button.clear     { background: #8e8e93; }
     <option value="UAH">UAH</option>
     <option value="OTHER">Другая...</option>
   </select>
-  <input id="toOther" class="hidden" placeholder="Код (THB, SGD и т.п.)">
+  <input id="toOther" class="hidden" placeholder="Код валюты (3 буквы)">
 
   <div class="row">
     <button class="secondary" onclick="swap()">↔ Поменять</button>
@@ -153,19 +162,18 @@ const API_KEY = "881800ddc11637e100f88122";
 const API = `https://v6.exchangerate-api.com/v6/${API_KEY}/latest/USD`;
 
 const els = {
-  amount:     document.getElementById("amount"),
-  from:       document.getElementById("from"),
-  to:         document.getElementById("to"),
-  fromOther:  document.getElementById("fromOther"),
-  toOther:    document.getElementById("toOther"),
-  manual:     document.getElementById("manualRate"),
-  output:     document.getElementById("output"),
-  meta:       document.getElementById("meta"),
-  modeBtn:    document.getElementById("modeBtn")
+  amount: document.getElementById("amount"),
+  from: document.getElementById("from"),
+  to: document.getElementById("to"),
+  fromOther: document.getElementById("fromOther"),
+  toOther: document.getElementById("toOther"),
+  manual: document.getElementById("manualRate"),
+  output: document.getElementById("output"),
+  meta: document.getElementById("meta"),
+  modeBtn: document.getElementById("modeBtn")
 };
 
 let rates = JSON.parse(localStorage.rates || "{}");
-let otherRates = JSON.parse(localStorage.otherRates || "{}");
 let state = JSON.parse(localStorage.fxState || "{}");
 let offline = state.offline ?? true;
 
@@ -175,8 +183,6 @@ function real(sel, other) {
   if (!/^[A-Z]{3}$/.test(code)) return null;
   return code;
 }
-
-function pairKey(f, t) { return `\( {f}_ \){t}`; }
 
 function toggleOther() {
   els.fromOther.classList.toggle("hidden", els.from.value !== "OTHER");
@@ -197,40 +203,28 @@ function toggleMode() {
 }
 
 function saveState() {
-  state = {
-    amount:     els.amount.value,
-    from:       els.from.value,
-    to:         els.to.value,
-    fromOther:  els.fromOther.value,
-    toOther:    els.toOther.value,
+  localStorage.fxState = JSON.stringify({
+    amount: els.amount.value,
+    from: els.from.value,
+    to: els.to.value,
+    fromOther: els.fromOther.value,
+    toOther: els.toOther.value,
     manualRate: els.manual.value,
     offline
-  };
-  localStorage.fxState = JSON.stringify(state);
+  });
 }
 
 async function loadRates(force = false) {
-  if (offline && !force) return false;
-  
-  els.meta.textContent = "Загрузка курсов...";
-  
+  if (offline && !force) return;
   try {
     const r = await fetch(API);
-    if (!r.ok) throw new Error("HTTP " + r.status);
     const d = await r.json();
-    
-    if (d.result !== "success") throw new Error("API error");
-    
     rates = d.conversion_rates;
     localStorage.rates = JSON.stringify(rates);
     localStorage.ratesTime = Date.now();
-    
-    els.meta.textContent = `Курсы обновлены: ${new Date().toLocaleTimeString('ru-RU')}`;
-    return true;
-  } catch (e) {
-    console.warn("Не удалось загрузить курсы", e);
-    els.meta.textContent = "Не удалось загрузить • используются сохранённые";
-    return false;
+    els.meta.textContent = "Курсы обновлены: " + new Date().toLocaleString("ru-RU");
+  } catch {
+    els.meta.textContent = "Ошибка загрузки • используется кэш";
   }
 }
 
@@ -238,58 +232,36 @@ function calculate() {
   saveState();
   toggleOther();
 
-  const rawAmt = els.amount.value.replace(/[^0-9.,]/g, '').replace(',', '.');
-  const amt = parseFloat(rawAmt);
-  
-  if (!rawAmt || isNaN(amt) || amt <= 0) {
-    els.output.textContent = "Введите корректную сумму";
+  const amt = parseFloat(els.amount.value.replace(',', '.'));
+  if (!amt || amt <= 0) {
+    els.output.textContent = "Введите сумму";
     return;
   }
 
   const f = real(els.from, els.fromOther);
   const t = real(els.to, els.toOther);
-
   if (!f || !t) {
-    els.output.textContent = "Некорректный код валюты (нужно 3 буквы)";
+    els.output.textContent = "Некорректный код валюты";
     return;
   }
 
-  const key = pairKey(f, t);
   let rate = null;
-
-  // Ручной курс — высший приоритет
-  if (els.manual.value.trim()) {
+  if (els.manual.value) {
     rate = parseFloat(els.manual.value.replace(',', '.'));
-    if (!isNaN(rate) && rate > 0) {
-      otherRates[key] = {
-        manual: rate,
-        updated: new Date().toISOString()
-      };
-      localStorage.otherRates = JSON.stringify(otherRates);
-    }
+  } else if (rates[f] && rates[t]) {
+    rate = rates[t] / rates[f];
   }
 
-  // Если ручного нет — берём из кэша или API
-  if (rate === null) {
-    if (f === "OTHER" || t === "OTHER") {
-      const rec = otherRates[key] || {};
-      rate = rec.manual || null;
-    } else if (rates[f] && rates[t]) {
-      rate = rates[t] / rates[f];
-    }
-  }
-
-  if (rate === null || isNaN(rate)) {
-    els.output.textContent = "Нет курса для этой пары\nПопробуйте ввести ручной курс";
+  if (!rate) {
+    els.output.textContent = "Нет курса для пары";
     return;
   }
 
   const res = amt * rate;
-
   els.output.textContent =
-`${amt.toLocaleString('ru-RU')} ${f}
+`${amt} ${f}
 ↓
-${res.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 4})} ${t}
+${res.toFixed(2)} ${t}
 
 1 ${f} ≈ ${rate.toFixed(6)} ${t}`;
 }
@@ -297,53 +269,47 @@ ${res.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 
 function swap() {
   [els.from.value, els.to.value] = [els.to.value, els.from.value];
   [els.fromOther.value, els.toOther.value] = [els.toOther.value, els.fromOther.value];
-  toggleOther();
   calculate();
 }
 
 function clearAll() {
   els.amount.value = "";
-  els.from.value = "USD";
-  els.to.value = "VND";
-  els.fromOther.value = "";
-  els.toOther.value = "";
   els.manual.value = "";
   els.output.textContent = "—";
-  toggleOther();
   saveState();
 }
 
-// События на автоматический пересчёт
-[
-  els.amount, els.from, els.to,
-  els.fromOther, els.toOther, els.manual
-].forEach(el => {
-  el.addEventListener("input", calculate);
-  el.addEventListener("change", calculate);
-});
+["input","change"].forEach(e =>
+  document.addEventListener(e, ev => {
+    if (ev.target.tagName === "INPUT" || ev.target.tagName === "SELECT") {
+      calculate();
+    }
+  })
+);
 
-// Инициализация
 function init() {
-  if (state.amount)     els.amount.value     = state.amount;
-  if (state.from)       els.from.value       = state.from;
-  if (state.to)         els.to.value         = state.to;
-  if (state.fromOther)  els.fromOther.value  = state.fromOther;
-  if (state.toOther)    els.toOther.value    = state.toOther;
-  if (state.manualRate) els.manual.value     = state.manualRate;
-
+  if (state.amount) els.amount.value = state.amount;
+  if (state.from) els.from.value = state.from;
+  if (state.to) els.to.value = state.to;
+  if (state.fromOther) els.fromOther.value = state.fromOther;
+  if (state.toOther) els.toOther.value = state.toOther;
+  if (state.manualRate) els.manual.value = state.manualRate;
   updateModeUI();
-  toggleOther();
-
-  const ratesTime = Number(localStorage.ratesTime) || 0;
-  const hoursOld = (Date.now() - ratesTime) / 3600000;
-  if (!offline && hoursOld > 24) {
-    loadRates(true);
-  }
-
+  if (!offline) loadRates(true);
   calculate();
 }
 
 init();
 </script>
+
+<!-- Service Worker -->
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./service-worker.js');
+  });
+}
+</script>
+
 </body>
 </html>

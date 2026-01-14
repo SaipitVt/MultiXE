@@ -1,9 +1,7 @@
 {
   "name": "FX калькулятор",
   "short_name": "FX Calc",
-  "description": "Мультивалютный офлайн FX калькулятор",
   "start_url": "./index.html",
-  "scope": "./",
   "display": "standalone",
   "background_color": "#f2f2f7",
   "theme_color": "#007aff",
